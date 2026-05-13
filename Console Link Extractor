@@ -1,83 +1,44 @@
 (async () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-  // Settings you can tweak
-  const WAIT_AFTER_SCROLL_MS = 1200;  // time to let new items load
-  const MAX_IDLE_ROUNDS = 8;          // stop after this many scrolls with no new links found
-  const MAX_ROUNDS = 500;             // hard safety limit
-
   const seen = new Set();
 
   function harvest() {
-    // Collect /status/ links (tweet permalinks). Filter out photo/video subpaths.
-    const anchors = Array.from(document.querySelectorAll('a[href*="/status/"]'));
-    let added = 0;
-
-    for (const a of anchors) {
+    document.querySelectorAll('a[href*="/status/"]').forEach(a => {
       let href = a.href || a.getAttribute("href");
-      if (!href) continue;
-
-      // Normalize relative URLs
+      if (!href) return;
       if (href.startsWith("/")) href = location.origin + href;
 
-      // Keep only clean tweet URL: https://x.com/{user}/status/{id}
-      const m = href.match(/https?:\/\/(?:www\.)?x\.com\/([^/]+)\/status\/(\d+)/);
-      if (!m) continue;
-
-      const clean = `https://x.com/${m[1]}/status/${m[2]}`;
-      if (!seen.has(clean)) {
-        seen.add(clean);
-        added++;
-      }
-    }
-    return added;
+      const m = href.match(/^https:\/\/(?:x|twitter)\.com\/[^\/]+\/status\/\d+/);
+      if (m) seen.add(m[0]);
+    });
   }
-
-  function downloadText(filename, text) {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }
-
-  console.log("Starting… harvesting currently visible items.");
-  harvest();
 
   let idle = 0;
-  for (let round = 1; round <= MAX_ROUNDS; round++) {
+  let lastCount = 0;
+
+  for (let i = 0; i < 500; i++) {
+    harvest();
     window.scrollTo(0, document.body.scrollHeight);
-    await sleep(WAIT_AFTER_SCROLL_MS);
+    await sleep(1200);
 
-    const added = harvest();
-    console.log(`Round ${round}: +${added} (total ${seen.size})`);
-
-    if (added === 0) idle++;
+    if (seen.size === lastCount) idle++;
     else idle = 0;
 
-    if (idle >= MAX_IDLE_ROUNDS) break;
+    lastCount = seen.size;
+
+    console.log(`Found ${seen.size} bookmark links...`);
+
+    if (idle >= 8) break;
   }
 
-  const links = Array.from(seen);
-  const output = links.join("\n");
+  const text = [...seen].join("\n");
+  console.log(text);
 
-  // Try to copy to clipboard (may require user gesture depending on browser settings)
-  try {
-    await navigator.clipboard.writeText(output);
-    console.log(`✅ Done. Collected ${links.length} links. Copied to clipboard.`);
-  } catch (e) {
-    console.log(`✅ Done. Collected ${links.length} links. (Clipboard copy blocked; see output below)`);
-  }
+  const blob = new Blob([text], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "bookmarks.txt";
+  a.click();
 
-  // Download a file too
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  downloadText(`x-bookmarks-${stamp}.txt`, output);
-
-  // Also leave it accessible in the console
-  window.__x_bookmark_links__ = links;
-  console.log("Saved to window.__x_bookmark_links__ (array). First 10:", links.slice(0, 10));
+  console.log(`Done. Saved ${seen.size} links.`);
 })();
